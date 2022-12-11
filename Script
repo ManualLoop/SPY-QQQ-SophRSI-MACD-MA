@@ -1,0 +1,108 @@
+import requests
+import discord
+import numpy as np
+
+# Set up Discord webhook
+webhook_url = "https://discordapp.com/api/webhooks/..."
+
+# Set up stocks to check
+stocks = ["QQQ", "SPY"]
+
+# Set up moving average thresholds
+trend_threshold = 0.15  # 15%
+ma_threshold = 100  # 100-day moving average
+
+# Set up Relative Strength Index (RSI) threshold
+rsi_threshold = 50  # 50 being the midpoint between overbought and oversold
+
+# Set up Volume threshold
+volume_threshold = 100  # 100 being the minimum required threshold
+
+# Set up MACD parameters
+fast_ema_window = 12
+slow_ema_window = 26
+signal_ema_window = 9
+
+# Set up Discord client
+client = discord.Webhook.from_url(webhook_url, adapter=discord.RequestsWebhookAdapter())
+
+# Function to calculate the MACD
+def calculate_macd(prices):
+  # Calculate the Exponential Moving Averages (EMAs)
+  fast_ema = np.mean(prices[-fast_ema_window:])
+  slow_ema = np.mean(prices[-slow_ema_window:])
+
+  # Calculate the MACD line
+  macd_line = fast_ema - slow_ema
+
+  # Calculate the MACD signal line
+  macd_signal_line = np.mean(macd_line[-signal_ema_window:])
+
+  # Calculate the MACD histogram
+  macd_histogram = macd_line - macd_signal_line
+
+  return macd_line, macd_signal_line, macd_histogram
+
+# Function to calculate the Stochastic RSI
+def calculate_stochastic_rsi(prices, window=14):
+  # Calculate the RSI
+  rsi = 100 - (100 / (1 + sum(prices[-window:]) / sum([p - prices[i] for i, p in enumerate(prices[-window:])])))
+
+ # Calculate the Stochastic RSI
+  min_rsi = min(rsi[-window:])
+  max_rsi = max(rsi[-window:])
+  stochastic_rsi = (rsi[-1] - min_rsi) / (max_rsi - min_rsi)
+
+  return stochastic_rsi
+
+# Function to check moving averages
+def check_moving_averages(stock):
+  # Fetch stock data
+  data = requests.get(f"https://api.iextrading.com/1.0/stock/%7Bstock%7D/chart/1d%22).json()
+
+  # Extract the closing prices
+  prices = [d["close"] for d in data]
+
+  # Calculate moving averages
+  ma_50 = sum(prices[-50:]) / 50
+  ma_100 = sum(prices[-100:]) / 100
+  ma_200 = sum(prices[-200:]) / 200
+
+  # Check if 50-day moving average is trending towards 100-day moving average
+  if ma_50 > ma_100 and ma_50 - ma_100 < trend_threshold * ma_100:
+    return True
+
+  # Check if 50-day moving average is trending towards 200-day moving average
+  if ma_50 > ma_200 and ma_50 - ma_200 < trend_threshold * ma_200:
+    return True
+
+  # Check if the Stochastic RSI is above or below the threshold
+  stochastic_rsi = calculate_stochastic_rsi(prices)
+  stochastic_rsi_threshold = 70  # 70%
+  if stochastic_rsi > stochastic_rsi_threshold or stochastic_rsi < (100 - stochastic_rsi_threshold):
+    return True
+
+  # Check if Volume is above the threshold
+volume = sum([d["volume"] for d in data[-14:]])
+if volume > volume_threshold:
+  return True
+
+# Check if MACD is above or below the threshold
+macd_line, macd_signal_line, macd_histogram = calculate_macd(prices)
+macd_threshold = 0.5  # 50%
+if macd_histogram > macd_threshold or macd_histogram < -macd_threshold:
+  return True
+
+# If none of the conditions are met, return False
+return False
+
+# Main loop
+while True:
+  # Check stocks
+  for stock in stocks:
+    if check_moving_averages(stock):
+      # Send message to Discord
+      client.send(f"Stock {stock} is trending towards its moving averages!")
+
+  # Wait 30 seconds before checking again
+  time.sleep(30)
